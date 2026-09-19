@@ -80,7 +80,7 @@ def engineer_advanced_features(df):
         group["Volume_Change_Pct"] = group["Volume"].pct_change() * 100
         group["Return_MA_3"] = group["Daily_Return_Pct"].rolling(window=3).mean()
 
-        # NAYE: Multi-day sentiment (single-day ki jagah rolling average, shifted by 1)
+        # NAYE: Multi-day sentiment (single-day ki jagah rolling average)
         group["Sentiment_MA_3"] = group["AvgSentiment"].shift(1).rolling(window=3).mean()
         group["Sentiment_MA_7"] = group["AvgSentiment"].shift(1).rolling(window=7).mean()
 
@@ -127,8 +127,7 @@ def run_cross_validation(df, feature_columns, n_splits=5):
         fold_accuracies.append(model_acc)
         fold_baselines.append(baseline_acc)
 
-        print(f"Fold {fold_num}: Train={len(train_idx):4d} Test={len(test_idx):4d} | "
-              f"Baseline={baseline_acc*100:.1f}% | Model={model_acc*100:.1f}% | "
+        print(f"Fold {fold_num}: Baseline={baseline_acc*100:.1f}% | Model={model_acc*100:.1f}% | "
               f"Diff={((model_acc-baseline_acc)*100):+.1f}%")
 
     return fold_accuracies, fold_baselines
@@ -146,29 +145,24 @@ def main():
         "Sentiment_MA_3", "Sentiment_MA_7", "RSI_14", "Bollinger_PercentB", "NewsCount"
     ]
 
-    print(f"\nFeatures used ({len(feature_columns)} total): {feature_columns}\n")
-    print("Running 5-fold Time-Series Cross-Validation...\n")
+    print(f"\n--- TEST A: Advanced features (RSI, Bollinger, multi-day sentiment) ---")
+    accuracies_adv, baselines_adv = run_cross_validation(df, feature_columns, n_splits=5)
 
-    accuracies, baselines = run_cross_validation(df, feature_columns, n_splits=5)
+    basic_columns = [
+        "Daily_Return_Pct", "Intraday_Spread_Pct", "Volume_Change_Pct", "Return_MA_3", "NewsCount"
+    ]
+    print(f"\n--- TEST B: Basic features ONLY, SAME rows (fair comparison) ---")
+    accuracies_basic, baselines_basic = run_cross_validation(df, basic_columns, n_splits=5)
 
     print("\n" + "="*60)
-    print(f"Average Model Accuracy:    {np.mean(accuracies)*100:.1f}% (+/- {np.std(accuracies)*100:.1f}%)")
-    print(f"Average Baseline Accuracy: {np.mean(baselines)*100:.1f}% (+/- {np.std(baselines)*100:.1f}%)")
-    print(f"Average Improvement:       {(np.mean(accuracies)-np.mean(baselines))*100:+.1f} points")
+    print("FAIR COMPARISON (both tested on identical 1368 rows):")
+    print(f"Basic features    -> Avg Accuracy: {np.mean(accuracies_basic)*100:.1f}% | vs baseline: {(np.mean(accuracies_basic)-np.mean(baselines_basic))*100:+.1f}%")
+    print(f"Advanced features -> Avg Accuracy: {np.mean(accuracies_adv)*100:.1f}% | vs baseline: {(np.mean(accuracies_adv)-np.mean(baselines_adv))*100:+.1f}%")
+    diff_real = (np.mean(accuracies_adv) - np.mean(accuracies_basic)) * 100
+    print(f"Real difference from adding RSI/Bollinger/multi-day sentiment: {diff_real:+.1f} points")
     print("="*60)
-
-    # Feature importances on latest full dataset
-    df_sorted = df.sort_values("Date")
-    split_idx = int(len(df_sorted) * 0.8)
-    X_train = df_sorted[feature_columns].iloc[:split_idx]
-    y_train = df_sorted["NextDayDirection"].iloc[:split_idx]
-    rf = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
-    rf.fit(X_train, y_train)
-
-    print("\nFeature Importance (Random Forest ranking):")
-    importances = sorted(zip(feature_columns, rf.feature_importances_), key=lambda x: -x[1])
-    for feat, imp in importances:
-        print(f"  {feat:<22} {imp:.3f}")
+    print("\nAgar ye 'real difference' bhi 2-3 points se kam hai, to advanced features ne")
+    print("genuinely kuch nahi add kiya — jo dikha wo dataset-change ka side-effect tha.")
 
 
 if __name__ == "__main__":
