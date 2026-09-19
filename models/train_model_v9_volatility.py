@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-STEP 11: Volatility Prediction — Naya Target, Naya Problem Framing
---------------------------------------------------------------------
+STEP 11: Volatility Prediction — Naya Target, Naya Problem Framing (3-Way Baseline Test)
+----------------------------------------------------------------------------------------
 Direction (UP/DOWN) predict karne ki jagah, ab hum "kal kitna BADA
 movement hoga" predict karenge (regression). Ye "volatility clustering"
 phenomenon exploit karta hai, jo direction se zyada well-established hai.
 
-Baseline yahan "persistence model" hai: "kal ka volatility aaj jaisa hoga"
--- ye khud strong baseline hai, isko beat karna asli test hai.
+3-Way Comparison:
+1. Naive persistence baseline ("kal ka volatility aaj jaisa hoga")
+2. Mean baseline ("hamesha training set ka mean predict karo")
+3. Real Random Forest Regressor
 
 Chalane ka tarika:
     python3 train_model_v9_volatility.py
@@ -93,9 +95,10 @@ def filter_recent_years(df, years=5):
 
 def run_volatility_cv(df, feature_columns, n_splits=5):
     """
-    Har fold mein 2 cheezein compare karenge:
+    Har fold mein 3 cheezein compare karenge:
     1. NAIVE BASELINE: "kal ka volatility aaj jaisa hoga" (persistence)
-    2. MODEL: Random Forest Regressor jo features use karta hai
+    2. MEAN BASELINE: "hamesha training set ka mean predict karo"
+    3. MODEL: Random Forest Regressor jo features use karta hai
     """
     df = df.sort_values("Date").reset_index(drop=True)
     X = df[feature_columns].values
@@ -103,15 +106,20 @@ def run_volatility_cv(df, feature_columns, n_splits=5):
     naive_predictions_source = df["Intraday_Spread_Pct"].values  # "aaj ka volatility" as naive guess
 
     tscv = TimeSeriesSplit(n_splits=n_splits)
-    model_rmses, naive_rmses, r2_scores = [], [], []
+    model_rmses, naive_rmses, mean_baseline_rmses, r2_scores = [], [], [], []
 
     for fold_num, (train_idx, test_idx) in enumerate(tscv.split(X), 1):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
         naive_test = naive_predictions_source[test_idx]
 
-        # Naive baseline: "kal jaisa aaj" -- RMSE calculate karo
+        # Baseline 1: Naive persistence ("kal jaisa aaj")
         naive_rmse = np.sqrt(mean_squared_error(y_test, naive_test))
+
+        # Baseline 2: Sirf TRAINING data ka average volatility predict karo (constant)
+        train_mean = y_train.mean()
+        mean_baseline_predictions = np.full_like(y_test, train_mean)
+        mean_baseline_rmse = np.sqrt(mean_squared_error(y_test, mean_baseline_predictions))
 
         # Real model
         model = RandomForestRegressor(n_estimators=150, max_depth=6, random_state=42, n_jobs=-1)
@@ -122,20 +130,22 @@ def run_volatility_cv(df, feature_columns, n_splits=5):
 
         model_rmses.append(model_rmse)
         naive_rmses.append(naive_rmse)
+        mean_baseline_rmses.append(mean_baseline_rmse)
         r2_scores.append(r2)
 
-        improvement_pct = ((naive_rmse - model_rmse) / naive_rmse) * 100
-        print(f"Fold {fold_num}: Naive RMSE={naive_rmse:.3f} | Model RMSE={model_rmse:.3f} | "
-              f"R²={r2:.3f} | Improvement={improvement_pct:+.1f}%")
+        vs_naive = ((naive_rmse - model_rmse) / naive_rmse) * 100
+        vs_mean = ((mean_baseline_rmse - model_rmse) / mean_baseline_rmse) * 100
+        print(f"Fold {fold_num}: Naive={naive_rmse:.3f} | MeanBaseline={mean_baseline_rmse:.3f} | "
+              f"Model={model_rmse:.3f} | R²={r2:.3f} | vs Naive={vs_naive:+.1f}% | vs Mean={vs_mean:+.1f}%")
 
-    return model_rmses, naive_rmses, r2_scores, model
+    return model_rmses, naive_rmses, mean_baseline_rmses, r2_scores, model
 
 
 def main():
     print("Loading dataset...")
     df = pd.read_csv(CSV_FILE)
 
-    print("Engineering volatility features across dataset...")
+    print("Engineering volatility features across full dataset...")
     df = engineer_volatility_features(df)
 
     print("Filtering to recent 5 years (2021-2026)...")
@@ -147,31 +157,37 @@ def main():
     ]
 
     print(f"\nRunning 5-fold Time-Series CV for VOLATILITY prediction...\n")
-    model_rmses, naive_rmses, r2_scores, model = run_volatility_cv(recent_df, feature_columns)
+    model_rmses, naive_rmses, mean_baseline_rmses, r2_scores, model = run_volatility_cv(recent_df, feature_columns)
 
     print("\n" + "="*60)
     avg_model_rmse = np.mean(model_rmses)
     avg_naive_rmse = np.mean(naive_rmses)
+    avg_mean_baseline_rmse = np.mean(mean_baseline_rmses)
     avg_r2 = np.mean(r2_scores)
-    improvement = ((avg_naive_rmse - avg_model_rmse) / avg_naive_rmse) * 100
 
     print(f"Average Naive (persistence) RMSE: {avg_naive_rmse:.3f}")
+    print(f"Average Mean-Baseline RMSE:       {avg_mean_baseline_rmse:.3f}  <- 'bas average predict karo'")
     print(f"Average Model RMSE:               {avg_model_rmse:.3f}")
     print(f"Average R² score:                 {avg_r2:.3f}")
-    print(f"Improvement over naive baseline:  {improvement:+.1f}%")
+    print(f"Improvement vs Naive:             {((avg_naive_rmse-avg_model_rmse)/avg_naive_rmse)*100:+.1f}%")
+    print(f"Improvement vs Mean-Baseline:      {((avg_mean_baseline_rmse-avg_model_rmse)/avg_mean_baseline_rmse)*100:+.1f}%")
 
-    # RMSE differences (positive = model better)
-    rmse_diffs = [n - m for n, m in zip(naive_rmses, model_rmses)]
-    t_stat, p_value = stats.ttest_1samp(rmse_diffs, 0)
-    print(f"P-value (is model reliably better than naive?): {p_value:.4f}")
+    rmse_diffs_vs_naive = [n - m for n, m in zip(naive_rmses, model_rmses)]
+    rmse_diffs_vs_mean = [mb - m for mb, m in zip(mean_baseline_rmses, model_rmses)]
+    _, p_vs_naive = stats.ttest_1samp(rmse_diffs_vs_naive, 0)
+    _, p_vs_mean = stats.ttest_1samp(rmse_diffs_vs_mean, 0)
+    print(f"P-value vs Naive:         {p_vs_naive:.4f}")
+    print(f"P-value vs Mean-Baseline: {p_vs_mean:.4f}")
     print("="*60)
 
-    if improvement > 5 and p_value < 0.05:
-        print("\n✅ Model naive baseline se reliably BETTER hai — volatility clustering exploit ho raha hai!")
-    elif improvement > 0:
-        print("\n⚠️  Thoda improvement hai, lekin statistically abhi confirm nahi.")
+    if avg_model_rmse < avg_mean_baseline_rmse and p_vs_mean < 0.05:
+        print("\n✅ Model genuinely kuch seekh raha hai — sirf 'average predict karo' se BEHTAR hai!")
     else:
-        print("\n❌ Simple 'yesterday=today' persistence hi best guess hai — model kuch extra nahi de raha.")
+        print("\n⚠️  IMPORTANT: Model 'mean baseline' se better NAHI hai (ya barely better).")
+        print("   -> Iska matlab: model ka 'naive ko beat karna' sirf isliye hai kyunki")
+        print("      persistence baseline khud bahut noisy/erratic hai (kal ke spike ko copy karta hai).")
+        print("      Model shayad sirf 'safe average ke paas predict karo' seekh raha hai,")
+        print("      genuine pattern nahi. Ye alag hai 'real predictive skill' se.")
 
     print("\nFeature Importance:")
     importances = sorted(zip(feature_columns, model.feature_importances_), key=lambda x: -x[1])
