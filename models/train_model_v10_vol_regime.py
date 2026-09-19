@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """
-STEP 12: Volatility REGIME Classification — Naya Angle
---------------------------------------------------------------------
+STEP 12: Volatility REGIME Classification — Naya Angle (Fair Comparison with Today_HighVol Included)
+----------------------------------------------------------------------------------------------------
 Regression mein model "mean ki taraf shrink" kar raha tha (koi genuine skill nahi).
 Ab hum SAME underlying phenomenon (volatility clustering) ko CLASSIFICATION
 ki tarah test karte hain: "Kal HIGH-vol din hoga ya LOW-vol din?"
 
-Classification mein "shrink to mean" wala trick nahi chal sakta -- model ko
-ek clear binary decision lena padta hai. Agar clustering genuine hai,
-ye yahan dikhna chahiye.
-
-BASELINE bhi is baar zyada smart hai: "Aaj jaisa regime, kal bhi wahi"
-(persistence classification) -- pehle wale "majority class" se stronger hai.
+Fair Comparison:
+Model ko ab 'Today_HighVol' feature explicitly diya gaya hai (jo persistence baseline use karta hai).
+Ab dekhte hain: kya Random Forest persistence ke upar (extra features se) koi additional edge create karta hai?
 
 Chalane ka tarika:
     python3 train_model_v10_vol_regime.py
@@ -148,12 +145,14 @@ def main():
     print("Filtering to recent 5 years (2021-2026)...")
     df = filter_recent_years(df, years=5)
 
+    # NOW FAIR: Today_HighVol is explicitly included in feature set!
     feature_columns = [
-        "Volatility_5", "Volatility_10", "Spread_MA_5",
+        "Today_HighVol", "Volatility_5", "Volatility_10", "Spread_MA_5",
         "Volume_Change_Pct", "RSI_14", "Abs_Return_Pct"
     ]
 
-    print(f"\nRunning 5-fold Time-Series CV for VOLATILITY REGIME classification...\n")
+    print(f"\nRunning 5-fold Time-Series CV for VOLATILITY REGIME classification...")
+    print(f"Features: {feature_columns}\n")
     model_accs, majority_accs, persistence_accs, model = run_regime_cv(df, feature_columns)
 
     print("\n" + "="*60)
@@ -181,7 +180,6 @@ def main():
         print("   hi sara actionable signal hai, extra engineered features kuch naya add nahi kar rahe.")
     else:
         print("\n❌ Na persistence, na model -- koi strong regime pattern nahi mila.")
-
 
     print("\nFeature Importance:")
     importances = sorted(zip(feature_columns, model.feature_importances_), key=lambda x: -x[1])
