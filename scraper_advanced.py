@@ -78,7 +78,12 @@ class YahooFinanceClient:
             logging.warning(f"Could not initialize Yahoo session token: {e}")
 
     def fetch_chart(self, symbol, interval="1d", range_str="5d"):
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={range_str}"
+        if range_str == "max":
+            now_ts = int(time.time())
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&period1=0&period2={now_ts}"
+        else:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={range_str}"
+            
         if self.crumb:
             url += f"&crumb={self.crumb}"
 
@@ -87,17 +92,22 @@ class YahooFinanceClient:
             "Referer": f"https://finance.yahoo.com/quote/{symbol}",
         }
 
-        res = self.session.get(url, headers=headers, timeout=12)
+        res = self.session.get(url, headers=headers, timeout=15)
         if res.status_code in (401, 429):
             logging.info("Refreshing expired crumb session...")
             self._init_session()
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={range_str}"
+            if range_str == "max":
+                now_ts = int(time.time())
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&period1=0&period2={now_ts}"
+            else:
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={range_str}"
             if self.crumb:
                 url += f"&crumb={self.crumb}"
-            res = self.session.get(url, headers=headers, timeout=12)
+            res = self.session.get(url, headers=headers, timeout=15)
 
         res.raise_for_status()
         return res.json()
+
 
 
 class StockDatabase:
