@@ -32,6 +32,7 @@ from pydantic import BaseModel
 import warnings
 warnings.filterwarnings("ignore")
 import joblib
+from model_inference import is_concept_question, generate_concept_answer
 
 try:
     from fastapi import FastAPI, HTTPException, Query
@@ -846,6 +847,18 @@ if USE_FASTAPI:
 
     @app.post("/api/chat")
     def post_chat(request: ChatRequest):
+        # 1. Hybrid Router: Check for conceptual/educational questions
+        if is_concept_question(request.message) and not any(kw in request.message.lower() for kw in ["buy", "sell", "kharido", "becho", "price", "rate", "news", "headline"]):
+            concept_ans = generate_concept_answer(request.message)
+            return {
+                "answer": concept_ans,
+                "intent_detected": "CONCEPT_EXPLANATION",
+                "symbol_detected": None,
+                "sources": [],
+                "grounded": True
+            }
+
+        # 2. Live Market Data & Statistical Snapshot Router (Deterministic SQLite RAG)
         intent = classify_intent(request.message)
         symbol = detect_symbol(request.message, request.symbol)
         answer_text, sources, grounded = generate_chat_response(intent, symbol, request.message)
@@ -905,6 +918,17 @@ else:
         data = request.get_json() or {}
         message = data.get("message", "")
         symbol = data.get("symbol", None)
+
+        if is_concept_question(message) and not any(kw in message.lower() for kw in ["buy", "sell", "kharido", "becho", "price", "rate", "news", "headline"]):
+            concept_ans = generate_concept_answer(message)
+            return jsonify({
+                "answer": concept_ans,
+                "intent_detected": "CONCEPT_EXPLANATION",
+                "symbol_detected": None,
+                "sources": [],
+                "grounded": True
+            })
+
         intent = classify_intent(message)
         detected_symbol = detect_symbol(message, symbol)
         answer_text, sources, grounded = generate_chat_response(intent, detected_symbol, message)
