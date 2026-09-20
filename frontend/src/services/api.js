@@ -193,3 +193,26 @@ export async function fetchBacktestSummary() {
     universe_size: 11
   };
 }
+
+export async function sendChatMessage(message, symbol = null) {
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, symbol })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.error("Chat API error:", err);
+  }
+
+  return {
+    answer: "Unable to reach the local research assistant server. Please ensure the backend is running on port 8000.",
+    intent_detected: "ERROR",
+    symbol_detected: symbol,
+    sources: [],
+    grounded: false
+  };
+}

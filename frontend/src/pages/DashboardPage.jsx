@@ -7,6 +7,7 @@ import IndicatorChart from '../components/IndicatorChart';
 import MonteCarloFanChart from '../components/MonteCarloFanChart';
 import VolatilityRegimeCard from '../components/VolatilityRegimeCard';
 import NewsFeed from '../components/NewsFeed';
+import ResearchChatPanel from '../components/ResearchChatPanel';
 import { fetchSymbols, fetchPrices, fetchNews, fetchPrediction, fetchMonteCarlo, fetchRegime } from '../services/api';
 import { DollarSign, Percent, BarChart3, Cpu, AlertTriangle, ShieldCheck } from 'lucide-react';
 
@@ -191,6 +192,9 @@ export default function DashboardPage() {
         </div>
 
       </div>
+
+      {/* Rule-Based Research Assistant Chat Panel */}
+      <ResearchChatPanel currentSymbol={selectedSymbol} />
 
     </div>
   );
