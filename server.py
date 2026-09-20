@@ -847,8 +847,11 @@ if USE_FASTAPI:
 
     @app.post("/api/chat")
     def post_chat(request: ChatRequest):
+        msg_lower = request.message.lower()
+        has_live_action_keyword = any(re.search(r'\b' + re.escape(kw) + r'\b', msg_lower) for kw in ["buy", "sell", "kharido", "becho", "price", "bhav", "news", "headline", "headlines"])
+
         # 1. Hybrid Router: Check for conceptual/educational questions
-        if is_concept_question(request.message) and not any(kw in request.message.lower() for kw in ["buy", "sell", "kharido", "becho", "price", "rate", "news", "headline"]):
+        if is_concept_question(request.message) and not has_live_action_keyword:
             concept_ans = generate_concept_answer(request.message)
             return {
                 "answer": concept_ans,
@@ -918,8 +921,10 @@ else:
         data = request.get_json() or {}
         message = data.get("message", "")
         symbol = data.get("symbol", None)
+        msg_lower = message.lower()
+        has_live_action_keyword = any(re.search(r'\b' + re.escape(kw) + r'\b', msg_lower) for kw in ["buy", "sell", "kharido", "becho", "price", "bhav", "news", "headline", "headlines"])
 
-        if is_concept_question(message) and not any(kw in message.lower() for kw in ["buy", "sell", "kharido", "becho", "price", "rate", "news", "headline"]):
+        if is_concept_question(message) and not has_live_action_keyword:
             concept_ans = generate_concept_answer(message)
             return jsonify({
                 "answer": concept_ans,
