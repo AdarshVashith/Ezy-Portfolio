@@ -4,9 +4,11 @@ import SymbolSelector from '../components/SymbolSelector';
 import DateRangeSelector from '../components/DateRangeSelector';
 import CandlestickChart from '../components/CandlestickChart';
 import IndicatorChart from '../components/IndicatorChart';
+import MonteCarloFanChart from '../components/MonteCarloFanChart';
+import VolatilityRegimeCard from '../components/VolatilityRegimeCard';
 import NewsFeed from '../components/NewsFeed';
-import { fetchSymbols, fetchPrices, fetchNews, fetchPrediction } from '../services/api';
-import { DollarSign, Percent, BarChart3, Cpu } from 'lucide-react';
+import { fetchSymbols, fetchPrices, fetchNews, fetchPrediction, fetchMonteCarlo, fetchRegime } from '../services/api';
+import { DollarSign, Percent, BarChart3, Cpu, AlertTriangle, ShieldCheck } from 'lucide-react';
 
 export default function DashboardPage() {
   const [symbols, setSymbols] = useState([]);
@@ -15,8 +17,13 @@ export default function DashboardPage() {
   const [prices, setPrices] = useState([]);
   const [news, setNews] = useState([]);
   const [prediction, setPrediction] = useState(null);
+  const [mcData, setMcData] = useState(null);
+  const [regimeData, setRegimeData] = useState(null);
+  
   const [isLoadingPrices, setIsLoadingPrices] = useState(true);
   const [isLoadingNews, setIsLoadingNews] = useState(true);
+  const [isLoadingMC, setIsLoadingMC] = useState(true);
+  const [isLoadingRegime, setIsLoadingRegime] = useState(true);
   const [lastNewsUpdated, setLastNewsUpdated] = useState('');
 
   useEffect(() => {
@@ -28,17 +35,28 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    async function loadPricesAndPred() {
+    async function loadAssetData() {
       setIsLoadingPrices(true);
-      const [pData, predData] = await Promise.all([
+      setIsLoadingMC(true);
+      setIsLoadingRegime(true);
+
+      const [pData, predData, mcRes, regimeRes] = await Promise.all([
         fetchPrices(selectedSymbol, rangeDays),
-        fetchPrediction(selectedSymbol)
+        fetchPrediction(selectedSymbol),
+        fetchMonteCarlo(selectedSymbol, 30),
+        fetchRegime(selectedSymbol)
       ]);
+
       setPrices(pData);
       setPrediction(predData);
+      setMcData(mcRes);
+      setRegimeData(regimeRes);
+
       setIsLoadingPrices(false);
+      setIsLoadingMC(false);
+      setIsLoadingRegime(false);
     }
-    loadPricesAndPred();
+    loadAssetData();
   }, [selectedSymbol, rangeDays]);
 
   const loadNews = useCallback(async () => {
@@ -49,7 +67,6 @@ export default function DashboardPage() {
     setIsLoadingNews(false);
   }, []);
 
-  // Initial load and 30-second live polling interval
   useEffect(() => {
     loadNews();
     const interval = setInterval(() => {
@@ -105,7 +122,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* KPI Cards Row */}
+      {/* Top KPI & Volatility Regime Telemetry Section */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           title="Latest Close"
@@ -126,27 +143,41 @@ export default function DashboardPage() {
           subtext="NSE Cash Market Volume"
           icon={BarChart3}
         />
-        <KPICard
-          title="Model Signal"
-          value={prediction ? prediction.signal : "Analyzing..."}
-          isSignal={true}
-          badgeText={prediction ? `${prediction.confidence}% Confidence (p=${prediction.p_value})` : ""}
-          subtext={prediction ? prediction.model_name : "Quant Engine"}
-          icon={Cpu}
+        <VolatilityRegimeCard
+          regimeData={regimeData}
+          isLoading={isLoadingRegime}
         />
       </div>
 
-      {/* Main Grid: Chart & Indicators (Left/Center) + News Feed (Right) */}
+      {/* Statistical Rigor & Directional Disclaimer Banner */}
+      <div className="bg-blue-50/60 rounded border border-blue-200/80 p-3.5 flex items-start space-x-2.5">
+        <ShieldCheck className="w-4 h-4 text-[#1E5FBF] shrink-0 mt-0.5" />
+        <div className="text-xs text-slate-700 leading-relaxed">
+          <strong className="text-[#1E5FBF] font-semibold">Statistical Integrity Note: </strong>
+          Volatility clustering shows robust, statistically confirmed autocorrelation (p=0.026), 
+          whereas directional predictions in the modern market regime do not exhibit a statistically significant edge (p=0.418). 
+          All model signals and forecasts are displayed strictly for research evaluation.
+        </div>
+      </div>
+
+      {/* Main Grid: Charts & Forecasts (Left 2 Columns) + News Sentiment Feed (Right 1 Column) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Left 2 Columns: Candlestick + Technical Indicators */}
+        {/* Left 2 Columns: Candlestick + Technical Indicators + Monte Carlo Fan Chart */}
         <div className="lg:col-span-2 space-y-4">
           <CandlestickChart
             data={prices}
             symbol={selectedSymbol}
             isLoading={isLoadingPrices}
           />
+          
           <IndicatorChart data={prices} />
+
+          {/* Monte Carlo 30-Day Probability Fan Chart */}
+          <MonteCarloFanChart
+            mcData={mcData}
+            isLoading={isLoadingMC}
+          />
         </div>
 
         {/* Right Column: Financial News Sentiment Feed */}
