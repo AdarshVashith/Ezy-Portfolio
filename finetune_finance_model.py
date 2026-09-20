@@ -19,13 +19,13 @@ import os
 import json
 
 try:
-    import torch
-    from datasets import Dataset
-    from transformers import (
+    import torch  # type: ignore
+    from datasets import Dataset  # type: ignore
+    from transformers import (  # type: ignore
         AutoModelForCausalLM, AutoTokenizer,
         TrainingArguments, Trainer, DataCollatorForLanguageModeling
     )
-    from peft import LoraConfig, get_peft_model, TaskType
+    from peft import LoraConfig, get_peft_model, TaskType  # type: ignore
     HAS_DEEP_LEARNING_LIBS = True
 except ImportError:
     HAS_DEEP_LEARNING_LIBS = False

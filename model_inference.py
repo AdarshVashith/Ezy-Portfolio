@@ -63,9 +63,9 @@ def load_finetuned_model():
         return None, None
 
     try:
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        from peft import PeftModel
+        import torch  # type: ignore
+        from transformers import AutoModelForCausalLM, AutoTokenizer  # type: ignore
+        from peft import PeftModel  # type: ignore
 
         _tokenizer = AutoTokenizer.from_pretrained(ADAPTER_PATH)
         base_model = AutoModelForCausalLM.from_pretrained(
@@ -114,7 +114,7 @@ def generate_concept_answer(message: str, max_new_tokens: int = 250) -> str:
 
     if model is not None and tokenizer is not None:
         try:
-            import torch
+            import torch  # type: ignore
             messages = [
                 {"role": "system", "content": "You are a specialized quant finance and trading systems assistant, trained on financial concepts and this project's empirical research findings."},
                 {"role": "user", "content": message}
