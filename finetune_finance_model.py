@@ -17,13 +17,18 @@ Chalane ka tarika:
 
 import os
 import json
-import torch
-from datasets import Dataset
-from transformers import (
-    AutoModelForCausalLM, AutoTokenizer,
-    TrainingArguments, Trainer, DataCollatorForLanguageModeling
-)
-from peft import LoraConfig, get_peft_model, TaskType
+
+try:
+    import torch
+    from datasets import Dataset
+    from transformers import (
+        AutoModelForCausalLM, AutoTokenizer,
+        TrainingArguments, Trainer, DataCollatorForLanguageModeling
+    )
+    from peft import LoraConfig, get_peft_model, TaskType
+    HAS_DEEP_LEARNING_LIBS = True
+except ImportError:
+    HAS_DEEP_LEARNING_LIBS = False
 
 BASE_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
 DATASET_FILE = "finance_training_data.jsonl"
@@ -53,6 +58,12 @@ def format_as_chat(example, tokenizer):
 
 
 def main():
+    if not HAS_DEEP_LEARNING_LIBS:
+        print("[Notice] Deep learning packages (torch, transformers, peft) are not installed in the local environment.")
+        print("Option 2 (Google Colab): Open and run 'Colab_Finance_FineTuning.ipynb' in Google Colab on a free T4 GPU.")
+        print("To install locally: pip install torch transformers datasets peft accelerate")
+        return
+
     print(f"Loading base model: {BASE_MODEL}")
     has_cuda = torch.cuda.is_available()
     has_mps = torch.backends.mps.is_available()
