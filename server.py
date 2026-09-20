@@ -437,12 +437,19 @@ def classify_intent(message: str) -> str:
 
 
 def detect_symbol(message: str, provided_symbol: str = None) -> str:
-    if provided_symbol and provided_symbol in SYMBOL_METADATA:
-        return provided_symbol
+    """
+    Message text mein mention kiya gaya company/stock name HAMESHA priority lega.
+    provided_symbol (dashboard ka currently-selected stock) sirf FALLBACK hai,
+    jab message mein koi company naam mention na ho.
+    """
     message_lower = message.lower()
     for name, symbol in COMPANY_SYMBOL_MAP.items():
         if re.search(r'\b' + re.escape(name) + r'\b', message_lower):
             return symbol
+
+    if provided_symbol and provided_symbol in SYMBOL_METADATA:
+        return provided_symbol
+
     return None
 
 
