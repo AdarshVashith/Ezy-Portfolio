@@ -31,6 +31,7 @@ from hmmlearn.hmm import GaussianHMM
 from pydantic import BaseModel
 import warnings
 warnings.filterwarnings("ignore")
+import joblib
 
 try:
     from fastapi import FastAPI, HTTPException, Query
@@ -42,6 +43,7 @@ except ImportError:
 
 DB_PATH = "stock_data.db"
 CSV_PATH = "ml_dataset.csv"
+MODEL_DIR = "trained_models"
 
 COMPANY_SYMBOL_MAP = {
     "reliance": "RELIANCE.NS", "ril": "RELIANCE.NS",
@@ -73,14 +75,22 @@ SYMBOL_METADATA = {
 
 INTENT_KEYWORDS = {
     "RECOMMENDATION": ["buy", "sell", "should i", "invest", "kharido", "becho",
-                        "lena chahiye", "recommend", "recommendation", "suggestion", "target price"],
+                        "lena chahiye", "recommend", "recommendation", "suggestion",
+                        "target price", "acha hai kya", "outlook", "kaisa lag raha",
+                        "opinion", "thoughts on", "view on", "analysis on"],
     "RELIABILITY": ["reliable", "reliability", "trust", "accurate", "accuracy", "confidence",
-                     "sahi hai", "kitna sahi", "believe", "performance", "edge", "alpha"],
-    "VOLATILITY": ["volatility", "regime", "risk", "turbulent", "calm", "stable", "spread", "range"],
-    "SENTIMENT": ["sentiment", "mood", "positive", "negative", "bullish", "bearish", "tone", "perception"],
-    "NEWS": ["news", "headline", "headlines", "khabar", "kya bola", "article", "report", "media", "latest"],
-    "PRICE": ["price", "kitna", "close", "high", "low", "value", "keemat", "bhav", "quote", "rate"],
-    "GREETING": ["hi", "hello", "hey", "namaste", "good morning", "good evening", "help", "who are you"],
+                     "confidence level", "sahi hai", "kitna sahi", "believe", "performance",
+                     "edge", "alpha", "proof", "findings"],
+    "VOLATILITY": ["volatility", "regime", "risk", "risk level", "turbulent", "calm",
+                   "stable", "spread", "range"],
+    "SENTIMENT": ["sentiment", "mood", "positive", "negative", "bullish", "bearish",
+                  "tone", "perception"],
+    "NEWS": ["news", "headline", "headlines", "khabar", "kya bola", "article",
+             "report", "media", "latest", "updates"],
+    "PRICE": ["price", "kitna", "kitna hai", "close", "high", "low", "value",
+              "current value", "keemat", "bhav", "quote", "rate"],
+    "GREETING": ["hi", "hello", "hey", "namaste", "good morning", "good evening",
+                 "help", "who are you"],
 }
 
 
@@ -512,13 +522,186 @@ def get_volatility_regime_simple_db(symbol: str):
     return None
 
 
+def load_trained_model(symbol: str):
+    """Loads daily-retrained model from disk. Returns None if not found."""
+    path = os.path.join(MODEL_DIR, f"{symbol.replace('.', '_')}_direction_model.joblib")
+    if not os.path.exists(path):
+        return None
+    try:
+        return joblib.load(path)
+    except Exception:
+        return None
+
+
+def get_recent_ohlc_db(symbol: str, limit: int = 60):
+    conn = get_db_connection()
+    if conn:
+        try:
+            df = pd.read_sql(
+                "SELECT * FROM ohlc_data WHERE symbol = ? ORDER BY date DESC LIMIT ?",
+                conn, params=(symbol, limit)
+            )
+            conn.close()
+            if not df.empty:
+                return df.sort_values("date").reset_index(drop=True)
+        except Exception:
+            if conn:
+                conn.close()
+    return pd.DataFrame()
+
+
+def calculate_rsi_series(prices: pd.Series, period: int = 14):
+    delta = prices.astype(float).diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
+
+
+def run_quick_monte_carlo_sim(df: pd.DataFrame, days: int = 30, simulations: int = 3000):
+    if df.empty or len(df) < 20:
+        return None
+    closes = df["close"].astype(float)
+    returns = closes.pct_change().dropna()
+    if len(returns) < 15:
+        return None
+    mu, sigma = float(returns.mean()), float(returns.std())
+    last_price = float(closes.iloc[-1])
+
+    np.random.seed(42)
+    shocks = np.random.normal(0, 1, size=(days, simulations))
+    multipliers = np.exp((mu - 0.5 * sigma**2) + sigma * shocks)
+    paths = last_price * np.cumprod(multipliers, axis=0)
+    final_prices = paths[-1, :]
+
+    return {
+        "prob_above_current_pct": round(float((final_prices > last_price).mean() * 100), 1),
+        "median_30d_price": round(float(np.median(final_prices)), 2),
+        "current_price": round(float(last_price), 2)
+    }
+
+
+def generate_statistical_snapshot(symbol: str):
+    """
+    Core Feature Upgrade: buy/sell inquiries return a complete 5-point
+    factual statistical evidence report rather than a blunt rejection.
+    """
+    clean_sym = symbol.replace(".NS", "")
+    df = get_recent_ohlc_db(symbol, limit=60)
+    
+    if df.empty or len(df) < 15:
+        # Fallback to CSV if DB query yielded insufficient records
+        if os.path.exists(CSV_PATH):
+            try:
+                raw_csv = pd.read_csv(CSV_PATH)
+                df = raw_csv[raw_csv["Symbol"] == symbol][["Date", "Open", "High", "Low", "Close", "Volume"]].rename(
+                    columns={"Date": "date", "Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}
+                ).tail(60).sort_values("date").reset_index(drop=True)
+            except Exception:
+                pass
+
+    if df.empty:
+        return f"Insufficient historical OHLCV data found in database for {clean_sym}.", [], False
+
+    df["close"] = df["close"].astype(float)
+    df["open"] = df["open"].astype(float)
+    df["high"] = df["high"].astype(float)
+    df["low"] = df["low"].astype(float)
+    if "volume" in df:
+        df["volume"] = df["volume"].astype(float)
+
+    sections = [f"STATISTICAL SNAPSHOT FOR {clean_sym} ({symbol}):\n"]
+
+    # 1. Trained Model Probability (WITH mandatory caveat)
+    model_data = load_trained_model(symbol)
+    if model_data:
+        try:
+            latest = df.iloc[-1:].copy()
+            latest["Daily_Return_Pct"] = ((latest["close"] - latest["open"]) / latest["open"]) * 100
+            latest["Intraday_Spread_Pct"] = ((latest["high"] - latest["low"]) / latest["open"]) * 100
+            latest["Volume_Change_Pct"] = df["volume"].pct_change().iloc[-1] * 100 if "volume" in df else 0.0
+            latest["Return_MA_3"] = df["close"].pct_change().tail(3).mean() * 100
+            rsi_val = calculate_rsi_series(df["close"]).iloc[-1]
+            latest["RSI_14"] = rsi_val if pd.notna(rsi_val) else 50.0
+
+            X = latest[model_data["feature_cols"]].fillna(0)
+            prob_up = float(model_data["model"].predict_proba(X)[0][1])
+            trained_date = model_data.get("trained_on", "recent")[:10]
+            caveat = model_data.get("known_reliability", "No statistically significant edge found in modern regime testing (p=0.418).")
+
+            sections.append(
+                f"1. MODEL SIGNAL: Trained model (last updated {trained_date}) "
+                f"estimates {prob_up*100:.1f}% probability of upward movement tomorrow.\n"
+                f"   CAVEAT: {caveat}\n"
+            )
+        except Exception as e:
+            sections.append(f"1. MODEL SIGNAL: Trained model available; calculation deferred ({e}).\n")
+    else:
+        sections.append("1. MODEL SIGNAL: Direction model retraining in progress.\n")
+
+    # 2. Technical Indicators
+    rsi_series = calculate_rsi_series(df["close"])
+    current_rsi = float(rsi_series.iloc[-1]) if pd.notna(rsi_series.iloc[-1]) else 50.0
+    ma20 = float(df["close"].tail(20).mean())
+    current_price = float(df["close"].iloc[-1])
+    rsi_status = "Overbought (>70)" if current_rsi > 70 else ("Oversold (<30)" if current_rsi < 30 else "Neutral")
+    ma_status = "above" if current_price >= ma20 else "below"
+
+    sections.append(
+        f"2. TECHNICAL INDICATORS: RSI(14) = {current_rsi:.1f} [{rsi_status}]. "
+        f"Price (₹{current_price:.2f}) is currently {ma_status} its 20-day moving average (₹{ma20:.2f}).\n"
+    )
+
+    # 3. Volatility Regime
+    df["spread_pct"] = ((df["high"] - df["low"]) / df["open"]) * 100
+    median_spread = float(df["spread_pct"].median())
+    today_spread = float(df["spread_pct"].iloc[-1])
+    regime = "Turbulent / High-Volatility" if today_spread > median_spread else "Calm / Low-Volatility"
+
+    sections.append(
+        f"3. VOLATILITY REGIME: Currently {regime} (latest range: {today_spread:.2f}% "
+        f"vs typical median {median_spread:.2f}%). This is the project's most statistically "
+        f"reliable signal type (p=0.026 in backtesting).\n"
+    )
+
+    # 4. News Sentiment
+    sentiment = get_sentiment_summary_db(symbol)
+    if sentiment:
+        sections.append(
+            f"4. NEWS SENTIMENT: Average score {sentiment['avg_sentiment']:+.3f} across "
+            f"{sentiment['total']} recent headlines ({sentiment['bullish_count']} bullish, "
+            f"{sentiment['bearish_count']} bearish, {sentiment['neutral_count']} neutral).\n"
+        )
+    else:
+        sections.append("4. NEWS SENTIMENT: No recent matched headlines found in database.\n")
+
+    # 5. Monte Carlo Outlook
+    mc = run_quick_monte_carlo_sim(df)
+    if mc:
+        sections.append(
+            f"5. 30-DAY PROBABILITY OUTLOOK: {mc['prob_above_current_pct']}% probability "
+            f"price is above current level (₹{mc['current_price']:.2f}) in 30 days, based on "
+            f"historical drift and volatility (median simulated price: ₹{mc['median_30d_price']:.2f}).\n"
+        )
+
+    sections.append(
+        "CONCLUSION: This is a factual summary of current quantitative indicators, not an investment directive. "
+        "The project's backtesting established that directional price movement behaves as a Martingale random walk (p=0.418) "
+        "-- use this empirical snapshot for independent research evaluation."
+    )
+
+    return "\n".join(sections), [], True
+
+
 def generate_chat_response(intent: str, symbol: str, message: str):
     sources = []
 
     if intent == "GREETING":
         return (
             "Hello! I am the rule-based Research Assistant for this quantitative finance project. "
-            "You can ask me about stock price quotes, news sentiment, volatility regimes, or the project's statistical backtest findings. "
+            "You can ask me about stock price quotes, news sentiment, volatility regimes, or ask 'Should I buy TCS?' for a full statistical evidence report. "
             "Example: 'What is the current volatility regime for TCS?' or 'What is the latest news on Reliance?'"
         ), sources, True
 
@@ -542,13 +725,7 @@ def generate_chat_response(intent: str, symbol: str, message: str):
     clean_sym = symbol.replace(".NS", "")
 
     if intent == "RECOMMENDATION":
-        return (
-            f"I cannot provide a buy or sell recommendation for {clean_sym}. "
-            f"This project's empirical research demonstrated that daily directional prediction (UP/DOWN) "
-            f"has no statistically significant edge in the modern market regime (2021-2026, p=0.418). "
-            f"An initial backtest indicating an 80%+ CAGR was proven to be an execution-timing artifact (capturing unexecutable overnight gaps), not genuine alpha. "
-            f"I can provide you with {clean_sym}'s live market data, news sentiment, and volatility regime so you can perform your own objective analysis."
-        ), sources, True
+        return generate_statistical_snapshot(symbol)
 
     if intent == "PRICE":
         latest = get_latest_price_db(symbol)
