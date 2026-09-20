@@ -852,13 +852,13 @@ if USE_FASTAPI:
 
         # 1. Hybrid Router: Check for conceptual/educational questions
         if is_concept_question(request.message) and not has_live_action_keyword:
-            concept_ans = generate_concept_answer(request.message)
+            concept_ans, is_grounded = generate_concept_answer(request.message)
             return {
                 "answer": concept_ans,
                 "intent_detected": "CONCEPT_EXPLANATION",
                 "symbol_detected": None,
                 "sources": [],
-                "grounded": True
+                "grounded": is_grounded
             }
 
         # 2. Live Market Data & Statistical Snapshot Router (Deterministic SQLite RAG)
@@ -925,13 +925,13 @@ else:
         has_live_action_keyword = any(re.search(r'\b' + re.escape(kw) + r'\b', msg_lower) for kw in ["buy", "sell", "kharido", "becho", "price", "bhav", "news", "headline", "headlines"])
 
         if is_concept_question(message) and not has_live_action_keyword:
-            concept_ans = generate_concept_answer(message)
+            concept_ans, is_grounded = generate_concept_answer(message)
             return jsonify({
                 "answer": concept_ans,
                 "intent_detected": "CONCEPT_EXPLANATION",
                 "symbol_detected": None,
                 "sources": [],
-                "grounded": True
+                "grounded": is_grounded
             })
 
         intent = classify_intent(message)

@@ -81,34 +81,66 @@ def load_finetuned_model():
         return None, None
 
 
-def find_best_knowledge_match(message: str):
-    """Fallback semantic keyword matcher over curated quant dataset."""
+STOPWORDS = {
+    "what", "is", "the", "in", "and", "how", "does", "why", "a", "an", "for",
+    "to", "of", "on", "it", "this", "that", "with", "as", "by", "at", "from",
+    "or", "are", "be", "do", "did", "can", "could", "should", "would", "about",
+    "simple", "terms", "here", "tell", "me", "please", "kya", "hai", "hota",
+    "technical", "analysis", "market", "trading", "project", "stock", "stocks", "used"
+}
+
+
+def extract_content_tokens(text: str) -> set:
+    words = re.findall(r'\b[a-zA-Z0-9_\-]+\b', text.lower())
+    return {w for w in words if w not in STOPWORDS and len(w) > 2}
+
+
+def find_best_knowledge_match(message: str, threshold: float = 0.30):
+    """
+    Jaccard content-token similarity matcher over curated quant dataset.
+    Prevents false overconfident matches for unseen concepts (e.g. Bollinger Bands / Sharpe Ratio).
+    """
     cache = load_knowledge_cache()
     if not cache:
-        return None
+        return None, 0.0
 
-    msg_lower = message.lower()
+    query_tokens = extract_content_tokens(message)
+    if not query_tokens:
+        return None, 0.0
+
     best_match = None
-    max_matches = 0
+    best_score = 0.0
 
     for item in cache:
-        instr = item.get("instruction", "").lower()
-        words = set(re.findall(r'\w+', instr))
-        matches = sum(1 for w in words if len(w) > 3 and w in msg_lower)
-        if matches > max_matches:
-            max_matches = matches
+        instr = item.get("instruction", "")
+        instr_tokens = extract_content_tokens(instr)
+        if not instr_tokens:
+            continue
+
+        intersection = query_tokens.intersection(instr_tokens)
+        union = query_tokens.union(instr_tokens)
+        if not union:
+            continue
+
+        score = len(intersection) / len(union)
+
+        if score > best_score:
+            best_score = score
             best_match = item
 
-    if best_match and max_matches >= 1:
-        return best_match.get("output")
+    if best_match and best_score >= threshold:
+        return best_match.get("output"), round(best_score, 3)
 
-    return None
+    return None, round(best_score, 3)
 
 
-def generate_concept_answer(message: str, max_new_tokens: int = 250) -> str:
+def generate_concept_answer(message: str, max_new_tokens: int = 250):
     """
-    Generates fluent, finance-specialized explanation using fine-tuned weights
-    or curated domain dataset engine.
+    Generates concept explanations:
+    1. If fine-tuned model adapter exists: uses local neural weights.
+    2. Otherwise: uses strict thresholded knowledge engine.
+    3. If query concept is unseen: honestly acknowledges uncertainty (grounded=False).
+    Returns (answer_text, is_grounded).
     """
     model, tokenizer = load_finetuned_model()
 
@@ -132,18 +164,20 @@ def generate_concept_answer(message: str, max_new_tokens: int = 250) -> str:
                 )
 
             response = tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-            return response.strip()
+            return response.strip(), True
         except Exception as e:
             print(f"Model generation fallback: {e}")
 
-    # Fallback to curated quant knowledge base
-    matched_answer = find_best_knowledge_match(message)
+    # Fallback to curated quant knowledge base with strict threshold
+    matched_answer, match_score = find_best_knowledge_match(message, threshold=0.35)
     if matched_answer:
-        return matched_answer
+        return matched_answer, True
 
+    # Honest admission of uncertainty for unseen concepts
     return (
-        "I am trained on this project's quantitative finance curriculum. "
-        "You can ask me to explain concepts such as GARCH volatility modeling, "
-        "the Kelly Criterion, Hidden Markov Models (HMM), Alpha Decay, RSI, "
-        "Monte Carlo simulations, p-value validation, or our empirical findings."
-    )
+        "I do not have a verified, empirical finding for this specific concept in my current quantitative knowledge base (similarity match score: "
+        f"{match_score:.2f} < threshold 0.35).\n\n"
+        "You can ask me about topics covered in this project's research curriculum: "
+        "GARCH volatility models, Kelly Criterion optimal sizing, 2-State Hidden Markov Models (HMM), "
+        "Alpha Decay in modern markets, RSI momentum, Monte Carlo risk simulation, or our backtest execution findings."
+    ), False
