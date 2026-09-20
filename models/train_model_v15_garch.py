@@ -116,11 +116,11 @@ def main():
     df = pd.read_csv(CSV_FILE)
     df["Date"] = pd.to_datetime(df["Date"])
 
-    symbols = df["Symbol"].unique()[:5]  # Top 5 symbols for demonstration
+    symbols = sorted(df["Symbol"].unique())  # All 11 symbols across universe
 
-    print("="*70)
-    print("GARCH(1,1) vs Simple Persistence Rule -- Volatility Forecast Comparison")
-    print("="*70)
+    print("="*75)
+    print(" GARCH(1,1) vs Simple Persistence Rule -- Full 11-Stock Universe")
+    print("="*75)
 
     all_garch_rmse, all_persistence_rmse = [], []
 
