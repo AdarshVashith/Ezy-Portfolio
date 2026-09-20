@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import KPICard from '../components/KPICard';
 import SymbolSelector from '../components/SymbolSelector';
 import DateRangeSelector from '../components/DateRangeSelector';
@@ -6,7 +6,7 @@ import CandlestickChart from '../components/CandlestickChart';
 import IndicatorChart from '../components/IndicatorChart';
 import NewsFeed from '../components/NewsFeed';
 import { fetchSymbols, fetchPrices, fetchNews, fetchPrediction } from '../services/api';
-import { DollarSign, Percent, BarChart3, ShieldAlert, Cpu, Activity } from 'lucide-react';
+import { DollarSign, Percent, BarChart3, Cpu } from 'lucide-react';
 
 export default function DashboardPage() {
   const [symbols, setSymbols] = useState([]);
@@ -17,6 +17,7 @@ export default function DashboardPage() {
   const [prediction, setPrediction] = useState(null);
   const [isLoadingPrices, setIsLoadingPrices] = useState(true);
   const [isLoadingNews, setIsLoadingNews] = useState(true);
+  const [lastNewsUpdated, setLastNewsUpdated] = useState('');
 
   useEffect(() => {
     async function loadSymbols() {
@@ -40,15 +41,22 @@ export default function DashboardPage() {
     loadPricesAndPred();
   }, [selectedSymbol, rangeDays]);
 
-  useEffect(() => {
-    async function loadNews() {
-      setIsLoadingNews(true);
-      const nData = await fetchNews(15);
-      setNews(nData);
-      setIsLoadingNews(false);
-    }
-    loadNews();
+  const loadNews = useCallback(async () => {
+    setIsLoadingNews(true);
+    const nData = await fetchNews(30);
+    setNews(nData);
+    setLastNewsUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    setIsLoadingNews(false);
   }, []);
+
+  // Initial load and 30-second live polling interval
+  useEffect(() => {
+    loadNews();
+    const interval = setInterval(() => {
+      loadNews();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [loadNews]);
 
   // Compute KPI values from price data
   const latestCandle = prices.length > 0 ? prices[prices.length - 1] : null;
@@ -143,7 +151,12 @@ export default function DashboardPage() {
 
         {/* Right Column: Financial News Sentiment Feed */}
         <div className="lg:col-span-1">
-          <NewsFeed news={news} isLoading={isLoadingNews} />
+          <NewsFeed
+            news={news}
+            isLoading={isLoadingNews}
+            onRefresh={loadNews}
+            lastUpdated={lastNewsUpdated}
+          />
         </div>
 
       </div>

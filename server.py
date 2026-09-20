@@ -130,22 +130,35 @@ def fetch_prices_data(symbol: str, days: int = 180):
     return []
 
 
-def fetch_news_data(limit: int = 15):
+def fetch_news_data(limit: int = 25):
     conn = get_db_connection()
     if conn:
         try:
             query = """
-            SELECT source, title, sentiment_score as sentiment, label, published 
-            FROM news_data 
+            SELECT source, title, sentiment, label, published, scraped_at 
+            FROM news 
             ORDER BY id DESC 
             LIMIT ?
             """
             df = pd.read_sql(query, conn, params=(limit,))
             conn.close()
             if not df.empty:
-                return df.to_dict(orient="records")
-        except Exception:
-            pass
+                records = []
+                for _, r in df.iterrows():
+                    lbl = str(r["label"]).capitalize() if pd.notna(r["label"]) else "Neutral"
+                    pub = str(r["published"]) if pd.notna(r["published"]) and str(r["published"]).strip() else str(r["scraped_at"])
+                    records.append({
+                        "source": str(r["source"]),
+                        "title": str(r["title"]),
+                        "sentiment": float(r["sentiment"]) if pd.notna(r["sentiment"]) else 0.0,
+                        "label": lbl,
+                        "published": pub
+                    })
+                return records
+        except Exception as e:
+            print(f"Database news fetch error: {e}")
+            if conn:
+                conn.close()
 
     return [
         {
@@ -154,20 +167,6 @@ def fetch_news_data(limit: int = 15):
             "sentiment": 0.45,
             "label": "Bullish",
             "published": "20 minutes ago"
-        },
-        {
-            "source": "LiveMint",
-            "title": "IT majors prepare for quarterly earnings amid resilient domestic cloud demand",
-            "sentiment": 0.15,
-            "label": "Neutral",
-            "published": "1 hour ago"
-        },
-        {
-            "source": "Moneycontrol",
-            "title": "Larsen & Toubro secures major international transmission EPC order in Middle East",
-            "sentiment": 0.78,
-            "label": "Bullish",
-            "published": "2 hours ago"
         }
     ]
 
